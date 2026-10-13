@@ -1,0 +1,12 @@
+[project]
+name = "finalproject-vinar-m26-555"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "prettytable>=3.18.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.0",
+]
