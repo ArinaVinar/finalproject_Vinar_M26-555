@@ -137,6 +137,10 @@ class Portfolio:
         self._wallets = dict(wallets or {})
 
     @property
+    def user_id(self) -> int:
+        return self._user_id
+
+    @property
     def user(self) -> User | None:
         return self._user
 
