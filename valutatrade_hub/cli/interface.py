@@ -3,6 +3,11 @@ import shlex
 
 from prettytable import PrettyTable
 
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+)
 from valutatrade_hub.core.models import User
 from valutatrade_hub.core.usecases import (
     buy_currency,
@@ -87,7 +92,13 @@ def handle_get_rate(args):
         print(f"Источник: {result['source']}")
         print(f"Время обновления: {result['updated_at']}")
         print(f"Обратный курс: {1 / result['rate']:.8f}")
-    except (ValueError, KeyError) as error:
+    except (
+        ValueError,
+        KeyError,
+        ApiRequestError,
+        CurrencyNotFoundError,
+        InsufficientFundsError,
+    ) as error:
         print(error)
 
 
@@ -106,9 +117,14 @@ def handle_buy(args):
         if result["value_usd"] is not None:
             print(f"Стоимость в USD: ${result['value_usd']:.2f}")
         print(f"Новый баланс: {result['balance']:g} {result['currency']}")
-    except (ValueError, KeyError) as error:
+    except (
+        ValueError,
+        KeyError,
+        ApiRequestError,
+        CurrencyNotFoundError,
+        InsufficientFundsError,
+    ) as error:
         print(error)
-
 
 def handle_sell(args):
     if current_user is None:
@@ -125,7 +141,13 @@ def handle_sell(args):
         if result["value_usd"] is not None:
             print(f"Стоимость в USD: ${result['value_usd']:.2f}")
         print(f"Остаток: {result['balance']:g} {result['currency']}")
-    except (ValueError, KeyError) as error:
+    except (
+        ValueError,
+        KeyError,
+        ApiRequestError,
+        CurrencyNotFoundError,
+        InsufficientFundsError,
+    ) as error:
         print(error)
 
 

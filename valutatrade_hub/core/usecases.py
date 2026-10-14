@@ -2,7 +2,14 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    InsufficientFundsError,
+)
 from valutatrade_hub.core.models import Portfolio, User, Wallet
+from valutatrade_hub.core.utils import validate_amount, validate_currency_code
+from valutatrade_hub.decorators import log_action
+from valutatrade_hub.infra.settings import SettingsLoader
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
@@ -159,8 +166,11 @@ def save_portfolio(portfolio: Portfolio) -> None:
     _save_portfolios(portfolios)
 
 
+
 def _get_usd_rate(currency: str) -> float:
-    """Возвращает курс валюты в долларах США"""
+    """Возвращает курс валюты в долларах США с учётом TTL."""
+
+    currency = validate_currency_code(currency)
 
     if currency == "USD":
         return 1.0
@@ -169,6 +179,9 @@ def _get_usd_rate(currency: str) -> float:
     rates = _read_json(RATES_FILE, {})
     cached = rates.get(key)
 
+    settings = SettingsLoader()
+    ttl = int(settings.get("RATES_TTL_SECONDS", 300))
+
     if cached:
         updated_at = datetime.fromisoformat(cached["updated_at"])
         now = datetime.now(UTC)
@@ -176,11 +189,11 @@ def _get_usd_rate(currency: str) -> float:
         if updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=UTC)
 
-        if now - updated_at < RATE_CACHE_TTL:
+        if now - updated_at < timedelta(seconds=ttl):
             return float(cached["rate"])
 
     if key not in STUB_RATES:
-        raise ValueError(f"Курс валюты {currency} пока недоступен")
+        raise ApiRequestError(f"курс валюты {currency} пока недоступен")
 
     rate = STUB_RATES[key]
     rates[key] = {
@@ -193,15 +206,12 @@ def _get_usd_rate(currency: str) -> float:
 
     return rate
 
-
+@log_action("GET_RATE")
 def get_rate(from_currency: str, to_currency: str) -> dict:
-    """Получить обменный курс между двумя валютами"""
+    """Получает обменный курс между двумя зарегистрированными валютами"""
 
-    from_currency = from_currency.strip().upper()
-    to_currency = to_currency.strip().upper()
-
-    if not from_currency or not to_currency:
-        raise ValueError("Укажите обе валюты")
+    from_currency = validate_currency_code(from_currency)
+    to_currency = validate_currency_code(to_currency)
 
     if from_currency == to_currency:
         return {
@@ -262,19 +272,18 @@ def get_portfolio_summary(user: User) -> dict:
     }
 
 
+@log_action("BUY")
 def buy_currency(user: User, currency: str, amount: float) -> dict:
-    """Покупка валюты на указанную стоимость"""
+    """Покупает валюту и зачисляет её в кошелёк пользователя"""
 
-    currency = currency.strip().upper()
-
-    if not currency:
-        raise ValueError("Укажите код валюты")
-
-    if amount <= 0:
-        raise ValueError("Количество должно быть больше нуля")
+    currency = validate_currency_code(currency)
+    amount = validate_amount(amount)
 
     portfolio = load_portfolio(user)
-    portfolio.add_currency(currency)
+
+    if currency not in portfolio.wallets:
+        portfolio.add_currency(currency)
+
     wallet = portfolio.get_wallet(currency)
     wallet.deposit(amount)
     save_portfolio(portfolio)
@@ -282,7 +291,7 @@ def buy_currency(user: User, currency: str, amount: float) -> dict:
     try:
         usd_rate = _get_usd_rate(currency)
         value_usd = amount * usd_rate
-    except ValueError:
+    except ApiRequestError:
         usd_rate = None
         value_usd = None
 
@@ -294,27 +303,26 @@ def buy_currency(user: User, currency: str, amount: float) -> dict:
         "balance": wallet.balance,
     }
 
-
+@log_action("SELL")
 def sell_currency(user: User, currency: str, amount: float) -> dict:
-    """Продажа валюты на указанную стоимость"""
+    """Продаёт валюту из кошелька пользователя"""
 
-    currency = currency.strip().upper()
-
-    if not currency:
-        raise ValueError("Укажите код валюты")
-
-    if amount <= 0:
-        raise ValueError("Количество должно быть больше нуля")
+    currency = validate_currency_code(currency)
+    amount = validate_amount(amount)
 
     portfolio = load_portfolio(user)
     wallet = portfolio.get_wallet(currency)
 
-    if wallet is None:
+    if currency not in portfolio.wallets:
         raise ValueError(f"У вас нет кошелька {currency}")
 
+    wallet = portfolio.get_wallet(currency)
+
     if wallet.balance < amount:
-        raise ValueError(
-            f"Недостаточно средств: доступно {wallet.balance:g} {currency}"
+        raise InsufficientFundsError(
+            available=wallet.balance,
+            required=amount,
+            code=currency,
         )
 
     wallet.withdraw(amount)
@@ -323,7 +331,7 @@ def sell_currency(user: User, currency: str, amount: float) -> dict:
     try:
         usd_rate = _get_usd_rate(currency)
         value_usd = amount * usd_rate
-    except ValueError:
+    except ApiRequestError:
         usd_rate = None
         value_usd = None
 
@@ -334,3 +342,4 @@ def sell_currency(user: User, currency: str, amount: float) -> dict:
         "value_usd": value_usd,
         "balance": wallet.balance,
     }
+
