@@ -17,6 +17,9 @@ from valutatrade_hub.core.usecases import (
     register_user,
     sell_currency,
 )
+from valutatrade_hub.parser_service.config import get_config
+from valutatrade_hub.parser_service.storage import RatesStorage
+from valutatrade_hub.parser_service.updater import RatesUpdater
 
 current_user: User | None = None
 
@@ -151,6 +154,92 @@ def handle_sell(args):
         print(error)
 
 
+def handle_update_rates(args: argparse.Namespace) -> None:
+    try:
+        result = RatesUpdater().run_update(source=args.source)
+        print(f"Обновление завершено. Получено курсов: {result['updated']}")
+
+        if result["pairs"]:
+            print("Обновлены пары: " + ", ".join(result["pairs"]))
+
+        if result["failures"]:
+            print("Предупреждения:")
+            for failure in result["failures"]:
+                print(f"- {failure}")
+
+        if result["last_refresh"]:
+            print(f"Время обновления: {result['last_refresh']}")
+
+        if result["failures"] and not result["updated"]:
+            print("Не удалось обновить курсы ни из одного источника.")
+
+    except (ValueError, OSError, TypeError) as error:
+        print(f"Не удалось обновить курсы: {error}")
+
+
+def handle_show_rates(args: argparse.Namespace) -> None:
+    if args.top is not None and args.top <= 0:
+        print("--top должен быть положительным числом.")
+        return
+    try:
+        config = get_config()
+        storage = RatesStorage(
+            config.RATES_FILE_PATH,
+            config.HISTORY_FILE_PATH,
+        )
+        cache = storage.load_cache()
+        pairs = cache["pairs"]
+        base = args.base.upper()
+
+        usd_rates = {"USD": 1.0}
+        for pair, item in pairs.items():
+            if pair.endswith("_USD"):
+                code = pair[:-4]
+                rate = item.get("rate")
+                if (
+                        isinstance(rate, (int, float))
+                        and not isinstance(rate, bool)
+                        and rate > 0
+                ):
+                    usd_rates[code] = float(rate)
+
+        if base not in usd_rates:
+            print(
+                f"Нет курса для базовой валюты {base}. "
+                "Сначала выполните update-rates."
+            )
+            return
+
+        rows = []
+        for code, usd_rate in usd_rates.items():
+            if code == base:
+                continue
+            if args.currency and code != args.currency.upper():
+                continue
+
+            cross_rate = usd_rate / usd_rates[base]
+            rows.append((code, cross_rate))
+
+        rows.sort(key=lambda item: item[1], reverse=True)
+
+        if args.top is not None:
+            rows = rows[:args.top]
+
+        if not rows:
+            print("Подходящие курсы в кэше не найдены.")
+            return
+
+        table = PrettyTable()
+        table.field_names = ["Валюта", f"Курс к {base}"]
+        for code, rate in rows:
+            table.add_row([code, f"{rate:.8f}"])
+
+        print(table)
+        print(f"Последнее обновление кэша: {cache.get('last_refresh') or 'н/д'}")
+
+    except (ValueError, OSError, TypeError, KeyError) as error:
+        print(f"Не удалось прочитать курсы: {error}")
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="valutatrade",
@@ -203,6 +292,38 @@ def build_parser() -> argparse.ArgumentParser:
     sell_parser.add_argument("--currency", required=True)
     sell_parser.add_argument("--amount", type=float, required=True)
     sell_parser.set_defaults(handler=handle_sell)
+
+    update_parser = subparsers.add_parser(
+        "update-rates",
+        help="Обновить курсы валют из внешних API",
+    )
+    update_parser.add_argument(
+        "--source",
+        choices=("all", "coingecko", "exchangerate"),
+        default="all",
+        help="Источник курсов; по умолчанию используются все источники",
+    )
+    update_parser.set_defaults(handler=handle_update_rates)
+
+    show_rates_parser = subparsers.add_parser(
+        "show-rates",
+        help="Показать курсы из локального кэша",
+    )
+    show_rates_parser.add_argument(
+        "--currency",
+        help="Показать курс конкретной валюты, например BTC",
+    )
+    show_rates_parser.add_argument(
+        "--top",
+        type=int,
+        help="Показать не более N курсов",
+    )
+    show_rates_parser.add_argument(
+        "--base",
+        default="USD",
+        help="Базовая валюта, по умолчанию USD",
+    )
+    show_rates_parser.set_defaults(handler=handle_show_rates)
 
     return parser
 
