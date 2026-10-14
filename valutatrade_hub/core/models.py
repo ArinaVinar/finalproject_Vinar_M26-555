@@ -2,6 +2,8 @@ import hashlib
 import secrets
 from datetime import datetime
 
+from valutatrade_hub.core.exceptions import InsufficientFundsError
+
 
 class User:
     """Класс зарегистрированного пользователя"""
@@ -100,11 +102,17 @@ class Wallet:
         self.balance += amount
 
     def withdraw(self, amount: float) -> None:
-        """Вывод средств"""
+        """Выводит средства из кошелька"""
 
         self._validate_amount(amount)
+
         if amount > self.balance:
-            raise ValueError("Недостаточно средств")
+            raise InsufficientFundsError(
+                available=self.balance,
+                required=amount,
+                code=self.currency_code,
+            )
+
         self.balance -= amount
 
     @staticmethod
