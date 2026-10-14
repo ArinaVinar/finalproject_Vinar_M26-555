@@ -165,10 +165,8 @@ def save_portfolio(portfolio: Portfolio) -> None:
 
     _save_portfolios(portfolios)
 
-
-
 def _get_usd_rate(currency: str) -> float:
-    """Возвращает курс валюты в долларах США с учётом TTL."""
+    """Возвращает курс валюты в долларах США с учётом TTL"""
 
     currency = validate_currency_code(currency)
 
@@ -177,34 +175,60 @@ def _get_usd_rate(currency: str) -> float:
 
     key = f"{currency}_USD"
     rates = _read_json(RATES_FILE, {})
-    cached = rates.get(key)
+
+    if not isinstance(rates, dict):
+        rates = {}
+
+    pairs = rates.get("pairs")
+    if isinstance(pairs, dict):
+        cached = pairs.get(key)
+    else:
+        cached = rates.get(key)
 
     settings = SettingsLoader()
     ttl = int(settings.get("RATES_TTL_SECONDS", 300))
 
-    if cached:
-        updated_at = datetime.fromisoformat(cached["updated_at"])
-        now = datetime.now(UTC)
+    if isinstance(cached, dict) and "rate" in cached:
+        updated_at = cached.get("updated_at")
 
-        if updated_at.tzinfo is None:
-            updated_at = updated_at.replace(tzinfo=UTC)
+        if updated_at:
+            try:
+                updated_at_dt = datetime.fromisoformat(updated_at)
+                if updated_at_dt.tzinfo is None:
+                    updated_at_dt = updated_at_dt.replace(tzinfo=UTC)
 
-        if now - updated_at < timedelta(seconds=ttl):
-            return float(cached["rate"])
+                age = datetime.now(UTC) - updated_at_dt
+                if timedelta(0) <= age < timedelta(seconds=ttl):
+                    return float(cached["rate"])
+            except (ValueError, TypeError):
+                pass
 
     if key not in STUB_RATES:
-        raise ApiRequestError(f"курс валюты {currency} пока недоступен")
+        raise ApiRequestError(
+            f"курс валюты {currency} пока недоступен"
+        )
 
     rate = STUB_RATES[key]
-    rates[key] = {
-        "rate": rate,
-        "updated_at": datetime.now(UTC).isoformat(),
-    }
-    rates["source"] = "stub"
-    rates["last_refresh"] = datetime.now(UTC).isoformat()
+    now = datetime.now(UTC).isoformat()
+
+    if isinstance(pairs, dict):
+        pairs[key] = {
+            "rate": rate,
+            "updated_at": now,
+            "source": "stub",
+        }
+        rates["pairs"] = pairs
+    else:
+        rates[key] = {
+            "rate": rate,
+            "updated_at": now,
+        }
+
+    rates["last_refresh"] = now
     _write_json(RATES_FILE, rates)
 
     return rate
+
 
 @log_action("GET_RATE")
 def get_rate(from_currency: str, to_currency: str) -> dict:
@@ -249,7 +273,7 @@ def get_portfolio_summary(user: User) -> dict:
         try:
             usd_rate = _get_usd_rate(currency)
             value_usd = balance * usd_rate
-        except ValueError:
+        except (ValueError, ApiRequestError):
             usd_rate = None
             value_usd = None
 
@@ -311,7 +335,6 @@ def sell_currency(user: User, currency: str, amount: float) -> dict:
     amount = validate_amount(amount)
 
     portfolio = load_portfolio(user)
-    wallet = portfolio.get_wallet(currency)
 
     if currency not in portfolio.wallets:
         raise ValueError(f"У вас нет кошелька {currency}")
@@ -342,4 +365,5 @@ def sell_currency(user: User, currency: str, amount: float) -> dict:
         "value_usd": value_usd,
         "balance": wallet.balance,
     }
+
 
