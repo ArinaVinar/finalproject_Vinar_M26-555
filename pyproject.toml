@@ -1,0 +1,20 @@
+[project]
+name = "finalproject-vinar-m26-555"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "prettytable>=3.18.0",
+    "requests>=2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.0",
+]
+
+[tool.valutatrade]
+RATES_TTL_SECONDS = 300
+BASE_CURRENCY = "USD"
+LOG_LEVEL = "INFO"
+LOG_MAX_BYTES = 1000000
+LOG_BACKUP_COUNT = 3
