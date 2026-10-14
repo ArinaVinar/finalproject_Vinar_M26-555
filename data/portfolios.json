@@ -1,18 +1,1 @@
-[
-  {
-    "user_id": 1,
-    "wallets": {
-      "EUR": {
-        "balance": 75.0
-      }
-    }
-  },
-  {
-    "user_id": "stage3_test",
-    "wallets": {
-      "USD": {
-        "balance": 110.0
-      }
-    }
-  }
-]
+
